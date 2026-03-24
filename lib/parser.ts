@@ -12,12 +12,9 @@ function normalizeText(text: string): string {
     .replace(/[|]/g, " ")
     .replace(/[：]/g, ":")
     .replace(/\r/g, "\n")
-    .replace(/C2\s*-\s*([0-9A-Z]+)/gi, "C2-$1")
-    .replace(/C1\s*-\s*([0-9A-Z]+)/gi, "C1-$1")
-    .replace(/GP\s*-\s*([0-9A-Z]+)/gi, "GP-$1")
-    .replace(/C2-\s+([0-9A-Z]+)/gi, "C2-$1")
-    .replace(/C1-\s+([0-9A-Z]+)/gi, "C1-$1")
-    .replace(/GP-\s+([0-9A-Z]+)/gi, "GP-$1")
+    // nối line no bị xuống dòng: C2- \n 085D
+    .replace(/((?:C\d|GP)-)\s*\n\s*([0-9]{2,3}[A-Z]?)/gi, "$1$2")
+    .replace(/((?:C\d|GP)-)\s+([0-9]{2,3}[A-Z]?)/gi, "$1$2")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{2,}/g, "\n")
     .trim();
@@ -36,25 +33,18 @@ function first(pattern: RegExp, text: string): string {
   return text.match(pattern)?.[1]?.trim() || "";
 }
 
-function cleanShipTo(value: string): string {
-  return value
-    .replace(/\bETA\s*:.*/i, "")
-    .replace(/\bETD\s*:.*/i, "")
-    .trim();
-}
-
 function extractBestLineNo(text: string): string {
-  const raw = String(text || "");
+  const raw = normalizeText(text);
+
+  // Line No đúng của file bạn là kiểu: C2-085D, C2-001D, C2-007D...
   const matches = Array.from(
-    raw.matchAll(/\b((?:C\d|GP)-\d{2,3}[A-Z]?)\b/gi)
+    raw.matchAll(/\b((?:C\d|GP)-[0-9]{2,3}[A-Z]?)\b/gi)
   ).map((m) => m[1].toUpperCase());
 
   if (!matches.length) return "";
 
   const counts = new Map<string, number>();
-  for (const m of matches) {
-    counts.set(m, (counts.get(m) || 0) + 1);
-  }
+  for (const m of matches) counts.set(m, (counts.get(m) || 0) + 1);
 
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
@@ -115,8 +105,7 @@ function parseItems(rawText: string, fallbackLineNo: string): ParsedItem[] {
   const items: ParsedItem[] = [];
   const seen = new Set<string>();
 
-  // OCR-friendly:
-  // PO No | Item No | Rev | Qty | UOM | optional NetWeight
+  // PO | Item | Rev | Qty | UOM | optional NetWeight
   const regex =
     /(\d{6,}-\d+)\s+(\d{7,})\s+(\d{2})\s+(\d+)\s+(PC|PCS|EA|SET|PR)\s*([\d.]+)?/gi;
 
@@ -131,14 +120,17 @@ function parseItems(rawText: string, fallbackLineNo: string): ParsedItem[] {
     const uom = match[5];
     const netWeight = match[6] || "";
 
-    const tail = text.slice(match.index, Math.min(text.length, match.index + 220));
-    const lineNo =
-      tail.match(/\b((?:C\d|GP)-\d{2,3}[A-Z]?)\b/i)?.[1]?.toUpperCase() ||
-      fallbackLineNo ||
-      "";
+    const tail = text.slice(match.index, Math.min(text.length, match.index + 260));
 
+    // Lot/Invoice là So + XC
     const lotSo = tail.match(/So:\s*([0-9]{4,})/i)?.[1] || "";
     const lotXc = tail.match(/\bXC([0-9]{5,6})\b/i)?.[1] || "";
+
+    // Line No đúng là dạng C2-085D / C2-001D / C2-013D...
+    const lineNo =
+      tail.match(/\b((?:C\d|GP)-[0-9]{2,3}[A-Z]?)\b/i)?.[1]?.toUpperCase() ||
+      fallbackLineNo ||
+      "";
 
     const key = `${poNo}|${itemNo}|${rev}|${quantity}|${lineNo}`;
     if (seen.has(key)) continue;
@@ -179,13 +171,12 @@ export function parseTextToDoc(text: string, sourceFile: string): ParsedDoc {
   const etd = first(/ETD\s*:\s*((?:20\d{2}-\d{2}-\d{2})\s+\d{2}:\d{2})/i, one);
   const routeCode = first(/\b(XC\d+-TC\d+)\b/i, one);
 
-  const lineNo = extractBestLineNo(one);
-
   const soldTo = first(/Sold To\s*:\s*(.*?)\s*ASN\s*No\s*:/i, one);
   const billTo = first(/Bill To\s*:\s*(.*?)\s*Ship To\s*:/i, one);
-  const shipTo = cleanShipTo(first(/Ship To\s*:\s*(.*?)\s*ETA\s*:/i, one));
+  const shipTo = first(/Ship To\s*:\s*(.*?)\s*ETA\s*:/i, one);
   const location = first(/Location\s*:\s*(.*?)\s*ETD\s*:/i, one);
 
+  const lineNo = extractBestLineNo(raw);
   const items = parseItems(raw, lineNo);
   const totalQuantity = items.reduce((sum, x) => sum + Number(x.quantity || 0), 0);
 
