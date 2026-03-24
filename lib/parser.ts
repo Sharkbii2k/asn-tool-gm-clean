@@ -104,9 +104,26 @@ function extractDocLineNo(rawText: string): string {
   const raw = normalizeText(rawText);
 
   const matches = Array.from(
-    raw.matchAll(/\b((?:C\d|GP)-[0-9OIL]{3}[A-Z])\b/gi)
+    raw.matchAll(/\b((?:C\d|GP)-[0-9OIL]{3}[A-Z0-9])\b/gi)
   )
-    .map((m) => normalizeLineNo(m[1]))
+    .map((m) => {
+      let v = m[1].toUpperCase();
+
+      const mm = v.match(/^((?:C\d|GP)-)([0-9OIL]{3})([A-Z0-9])$/);
+      if (!mm) return "";
+
+      const prefix = mm[1];
+      const nums = mm[2]
+        .replace(/O/g, "0")
+        .replace(/I/g, "1")
+        .replace(/L/g, "1");
+
+      let suffix = mm[3];
+      if (suffix === "0") suffix = "D";
+      if (suffix === "O") suffix = "D";
+
+      return `${prefix}${nums}${suffix}`;
+    })
     .filter(Boolean)
     .filter((v) => !/XC/i.test(v))
     .filter((v) => /^(?:C\d|GP)-\d{3}[A-Z]$/.test(v));
@@ -114,7 +131,9 @@ function extractDocLineNo(rawText: string): string {
   if (!matches.length) return "";
 
   const counts = new Map<string, number>();
-  for (const v of matches) counts.set(v, (counts.get(v) || 0) + 1);
+  for (const v of matches) {
+    counts.set(v, (counts.get(v) || 0) + 1);
+  }
 
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
@@ -198,7 +217,7 @@ export function parseTextToDoc(text: string, sourceFile: string): ParsedDoc {
   const shipTo = first(/Ship To\s*:\s*(.*?)\s*ETA\s*:/i, one);
   const location = first(/Location\s*:\s*(.*?)\s*ETD\s*:/i, one);
 
-  const lineNo = extractDocLineNo(raw);
+ const lineNo = extractDocLineNo(raw) || extractDocLineNo(one);
   const items = parseItems(raw, lineNo);
   const totalQuantity = items.reduce((sum, x) => sum + Number(x.quantity || 0), 0);
 
