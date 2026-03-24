@@ -1,0 +1,5 @@
+export type PackingRow = { item: string; rev: string; pack: number | string };
+export type ParsedItem = { seq:number; poNo:string; itemNo:string; rev:string; quantity:number; uom:string; netWeight:number|string; grossWeight:number|string; packingSpec:string; lotRef:string; lineNo:string };
+export type ParsedDoc = { sourceFile:string; asnNo:string; eta:string; etd:string; date:string; time:string; soldTo:string; billTo:string; shipTo:string; location:string; routeCode:string; lineNo:string; totalQuantity:number; items:ParsedItem[]; rawText?:string };
+export type HeaderRow = { "ASN No":string; "ETA":string; "ETD":string; "Sold To":string; "Bill To":string; "Ship To":string; "Location":string; "Line No":string };
+export type LinesRow = { "ASN":string; "Item":string; "Rev":string; "Quantity":number|string; "Packing":number|string; "Thùng chẵn":number|string; "SL lẻ PCS":number|string; "Tổng Cartons":number|string; "Line No":string; "Location":string; "Packing Found":string; "Calc Status":string; "__loose_carton"?:number };

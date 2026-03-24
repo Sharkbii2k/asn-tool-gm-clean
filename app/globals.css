@@ -1,0 +1,14 @@
+@tailwind base; @tailwind components; @tailwind utilities;
+html,body{background:#f3f5f9;color:#111827;font-family:Arial,Helvetica,sans-serif} *{box-sizing:border-box}
+.app-shell{max-width:980px;margin:0 auto;min-height:100vh;padding:20px 16px 96px}
+.card{@apply rounded-[28px] bg-white border border-brand-line shadow-sm}
+.input{@apply w-full rounded-3xl border border-brand-line bg-white px-4 py-4 text-base outline-none}
+.primary-btn{@apply w-full rounded-3xl bg-brand-orange py-4 text-xl font-bold text-white disabled:opacity-50}
+.secondary-btn{@apply w-full rounded-3xl bg-brand-navy py-4 text-xl font-bold text-white disabled:opacity-50}
+.small-btn{@apply rounded-2xl border border-brand-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-50}
+.table-wrap{@apply overflow-x-auto rounded-3xl border border-brand-line bg-white}
+.ui-table{@apply min-w-full border-collapse text-sm}
+.ui-table th{@apply border-b border-brand-line bg-[#eef5ea] px-3 py-3 text-left font-bold whitespace-nowrap}
+.ui-table td{@apply border-b border-brand-line px-3 py-3 align-top}
+.tab-chip{@apply flex-1 rounded-3xl py-4 text-lg font-bold transition-colors}
+.tab-chip.active{@apply bg-brand-orange text-white}.tab-chip.inactive{@apply text-slate-700}
