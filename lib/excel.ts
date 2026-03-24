@@ -35,6 +35,7 @@ function styleCell(
     center?: boolean;
     border?: boolean;
     size?: number;
+    wrap?: boolean;
   } = {}
 ) {
   if (opts.fill) {
@@ -47,8 +48,8 @@ function styleCell(
 
   cell.alignment = {
     vertical: "middle",
-    horizontal: opts.center ? "center" : undefined,
-    wrapText: true,
+    horizontal: opts.center ? "center" : "left",
+    wrapText: opts.wrap ?? true,
   };
 
   if (opts.bold || opts.size) {
@@ -73,19 +74,27 @@ function safeText(v: unknown): string | number {
   return v as string | number;
 }
 
-function sortByAsn<T extends { asnNo?: string; ASN?: string }>(rows: T[]): T[] {
-  return [...rows].sort((a, b) => {
-    const av = String(a.asnNo ?? a.ASN ?? "");
-    const bv = String(b.asnNo ?? b.ASN ?? "");
-    return av.localeCompare(bv);
-  });
+function sortDocs(docs: ParsedDoc[]): ParsedDoc[] {
+  return [...docs].sort((a, b) => String(a.asnNo || "").localeCompare(String(b.asnNo || "")));
+}
+
+function sortHeaders(rows: HeaderRow[]): HeaderRow[] {
+  return [...rows].sort((a, b) =>
+    String(a["ASN No"] || "").localeCompare(String(b["ASN No"] || ""))
+  );
+}
+
+function sortLines(rows: LinesRow[]): LinesRow[] {
+  return [...rows].sort((a, b) =>
+    String(a["ASN"] || "").localeCompare(String(b["ASN"] || ""))
+  );
 }
 
 function getAsnFillMap(lines: LinesRow[]): Map<string, string> {
   const map = new Map<string, string>();
   let toggle = 0;
 
-  for (const row of sortByAsn(lines)) {
+  for (const row of sortLines(lines)) {
     const asn = String(row["ASN"] || "");
     if (!asn) continue;
     if (!map.has(asn)) {
@@ -99,9 +108,9 @@ function getAsnFillMap(lines: LinesRow[]): Map<string, string> {
 
 function buildInlineSummary(docs: ParsedDoc[]) {
   const totalAsn = docs.length;
-  const cpt = docs.filter((d) => String(d.lineNo || "").includes("C2")).length;
-  const op = docs.filter((d) => String(d.lineNo || "").includes("C1")).length;
-  const gp = docs.filter((d) => String(d.lineNo || "").includes("GP")).length;
+  const cpt = docs.filter((d) => String(d.lineNo || "").startsWith("C2")).length;
+  const op = docs.filter((d) => String(d.lineNo || "").startsWith("C1")).length;
+  const gp = docs.filter((d) => String(d.lineNo || "").startsWith("GP")).length;
 
   return [
     ["Tổng ASN", totalAsn, COLORS.green],
@@ -117,6 +126,7 @@ function normalizeSummary(summary?: SummaryRow[]): SummaryRow[] {
     { Location: "OP", "Thùng chẵn": 0, "Tổng số thùng lẻ": 0, "Tổng": 0 },
     { Location: "GP", "Thùng chẵn": 0, "Tổng số thùng lẻ": 0, "Tổng": 0 },
   ];
+
   if (!summary?.length) return base;
 
   for (const row of summary) {
@@ -131,24 +141,25 @@ function normalizeSummary(summary?: SummaryRow[]): SummaryRow[] {
 }
 
 function writeAsnSheet(ws: ExcelJS.Worksheet, docs: ParsedDoc[]) {
+  ws.views = [{ state: "frozen", ySplit: 1 }];
   ws.columns = [
-    { width: 8 },  // A Seq
-    { width: 16 }, // B PO
-    { width: 15 }, // C Item
-    { width: 8 },  // D Rev
-    { width: 12 }, // E Qty
-    { width: 8 },  // F Uom
-    { width: 16 }, // G Net
-    { width: 18 }, // H Gross
-    { width: 16 }, // I Packing Spec
-    { width: 28 }, // J Lot Ref
-    { width: 12 }, // K Line No
-    { width: 4 },  // L spacer
-    { width: 14 }, // M summary label
-    { width: 10 }, // N summary value
+    { width: 8 },
+    { width: 16 },
+    { width: 15 },
+    { width: 8 },
+    { width: 12 },
+    { width: 8 },
+    { width: 16 },
+    { width: 18 },
+    { width: 16 },
+    { width: 28 },
+    { width: 12 },
+    { width: 4 },
+    { width: 14 },
+    { width: 10 },
   ];
 
-  const blockDocs = sortByAsn(docs);
+  const rows = sortDocs(docs);
   const asnHeaders = [
     "Seq",
     "PO No.",
@@ -165,16 +176,12 @@ function writeAsnSheet(ws: ExcelJS.Worksheet, docs: ParsedDoc[]) {
 
   let row = 1;
 
-  for (let i = 0; i < blockDocs.length; i++) {
-    const doc = blockDocs[i];
-    const blockFill = i % 2 === 0 ? COLORS.alt1 : COLORS.alt2;
+  rows.forEach((doc, idx) => {
+    const fill = idx % 2 === 0 ? COLORS.alt1 : COLORS.alt2;
 
     ws.mergeCells(row, 1, row, 11);
     for (let c = 1; c <= 11; c++) {
-      styleCell(ws.getCell(row, c), {
-        fill: COLORS.title,
-        border: true,
-      });
+      styleCell(ws.getCell(row, c), { fill: COLORS.title, border: true });
     }
 
     ws.getCell(row, 1).value = safeText(doc.asnNo);
@@ -202,9 +209,9 @@ function writeAsnSheet(ws: ExcelJS.Worksheet, docs: ParsedDoc[]) {
     styleCell(ws.getCell(row + 2, 4), { bold: true });
 
     const headerRow = row + 4;
-    asnHeaders.forEach((label, idx) => {
-      ws.getCell(headerRow, idx + 1).value = label;
-      styleCell(ws.getCell(headerRow, idx + 1), {
+    asnHeaders.forEach((label, i) => {
+      ws.getCell(headerRow, i + 1).value = label;
+      styleCell(ws.getCell(headerRow, i + 1), {
         fill: COLORS.header,
         bold: true,
         center: true,
@@ -213,9 +220,9 @@ function writeAsnSheet(ws: ExcelJS.Worksheet, docs: ParsedDoc[]) {
     });
 
     const items = doc.items || [];
-    items.forEach((item, itemIndex) => {
-      const r = headerRow + 1 + itemIndex;
-      const values = [
+    items.forEach((item, i) => {
+      const r = headerRow + 1 + i;
+      const vals = [
         item.seq,
         item.poNo,
         item.itemNo,
@@ -229,20 +236,22 @@ function writeAsnSheet(ws: ExcelJS.Worksheet, docs: ParsedDoc[]) {
         item.lineNo || doc.lineNo,
       ];
 
-      values.forEach((v, c) => {
+      vals.forEach((v, c) => {
         ws.getCell(r, c + 1).value = safeText(v);
-        styleCell(ws.getCell(r, c + 1), { border: true, center: true });
+        styleCell(ws.getCell(r, c + 1), {
+          border: true,
+          center: true,
+        });
         ws.getCell(r, c + 1).fill = {
           type: "pattern",
           pattern: "solid",
-          fgColor: { argb: blockFill },
+          fgColor: { argb: fill },
         };
       });
     });
 
     const totalRow = headerRow + 1 + items.length;
     ws.mergeCells(totalRow, 1, totalRow, 4);
-
     ws.getCell(totalRow, 1).value = "Total Quantity";
     styleCell(ws.getCell(totalRow, 1), {
       fill: COLORS.sub,
@@ -263,21 +272,20 @@ function writeAsnSheet(ws: ExcelJS.Worksheet, docs: ParsedDoc[]) {
     }
 
     row = totalRow + 3;
-  }
+  });
 
-  const summaryRows = buildInlineSummary(blockDocs);
+  const summaryRows = buildInlineSummary(rows);
   summaryRows.forEach((entry, idx) => {
-    const excelRow = idx + 1;
-    ws.getCell(excelRow, 13).value = entry[0];
-    ws.getCell(excelRow, 14).value = entry[1];
-
-    styleCell(ws.getCell(excelRow, 13), {
+    const r = idx + 1;
+    ws.getCell(r, 13).value = entry[0];
+    ws.getCell(r, 14).value = entry[1];
+    styleCell(ws.getCell(r, 13), {
       fill: entry[2],
       bold: true,
       center: true,
       border: true,
     });
-    styleCell(ws.getCell(excelRow, 14), {
+    styleCell(ws.getCell(r, 14), {
       fill: entry[2],
       bold: true,
       center: true,
@@ -287,18 +295,19 @@ function writeAsnSheet(ws: ExcelJS.Worksheet, docs: ParsedDoc[]) {
 }
 
 function writeHeaderSheet(ws: ExcelJS.Worksheet, headers: HeaderRow[]) {
+  ws.views = [{ state: "frozen", ySplit: 1 }];
   ws.columns = [
-    { width: 16 }, // ASN
-    { width: 18 }, // ETA
-    { width: 12 }, // ETD
-    { width: 38 }, // Sold To
-    { width: 52 }, // Bill To
-    { width: 38 }, // Ship To
-    { width: 62 }, // Location
-    { width: 12 }, // Line No
+    { width: 16 },
+    { width: 18 },
+    { width: 12 },
+    { width: 30 },
+    { width: 36 },
+    { width: 30 },
+    { width: 42 },
+    { width: 14 },
   ];
 
-  const headerCols = [
+  const cols = [
     "ASN No",
     "ETA",
     "ETD",
@@ -309,7 +318,7 @@ function writeHeaderSheet(ws: ExcelJS.Worksheet, headers: HeaderRow[]) {
     "Line No",
   ] as const;
 
-  headerCols.forEach((label, idx) => {
+  cols.forEach((label, idx) => {
     ws.getCell(1, idx + 1).value = label;
     styleCell(ws.getCell(1, idx + 1), {
       fill: COLORS.header,
@@ -319,46 +328,49 @@ function writeHeaderSheet(ws: ExcelJS.Worksheet, headers: HeaderRow[]) {
     });
   });
 
-  const rows = sortByAsn(headers as any) as HeaderRow[];
+  const rows = sortHeaders(headers);
   rows.forEach((row, idx) => {
     const fill = idx % 2 === 0 ? COLORS.alt1 : COLORS.alt2;
-    headerCols.forEach((key, cidx) => {
-      ws.getCell(idx + 2, cidx + 1).value = safeText(row[key]);
-      styleCell(ws.getCell(idx + 2, cidx + 1), { border: true });
-      ws.getCell(idx + 2, cidx + 1).fill = {
+    cols.forEach((key, cidx) => {
+      const cell = ws.getCell(idx + 2, cidx + 1);
+      cell.value = safeText(row[key]);
+      styleCell(cell, { border: true, wrap: true });
+      cell.fill = {
         type: "pattern",
         pattern: "solid",
         fgColor: { argb: fill },
       };
     });
+    ws.getRow(idx + 2).height = 42;
   });
 }
 
 function writeLinesSheet(
   ws: ExcelJS.Worksheet,
   lines: LinesRow[],
-  summaryRows: SummaryRow[]
+  summary: SummaryRow[]
 ) {
+  ws.views = [{ state: "frozen", ySplit: 1 }];
   ws.columns = [
-    { width: 16 }, // ASN
-    { width: 14 }, // Item
-    { width: 8 },  // Rev
-    { width: 12 }, // Quantity
-    { width: 10 }, // Packing
-    { width: 12 }, // Thung chan
-    { width: 10 }, // SL le PCS
-    { width: 12 }, // Tong cartons
-    { width: 14 }, // Line No
-    { width: 10 }, // Location
-    { width: 12 }, // Packing Found
-    { width: 12 }, // Calc Status
-    { width: 12 }, // M
-    { width: 12 }, // N
-    { width: 12 }, // O
-    { width: 10 }, // P
+    { width: 16 },
+    { width: 14 },
+    { width: 8 },
+    { width: 12 },
+    { width: 10 },
+    { width: 12 },
+    { width: 10 },
+    { width: 12 },
+    { width: 14 },
+    { width: 10 },
+    { width: 12 },
+    { width: 12 },
+    { width: 12 },
+    { width: 12 },
+    { width: 12 },
+    { width: 10 },
   ];
 
-  const lineCols = [
+  const cols = [
     "ASN",
     "Item",
     "Rev",
@@ -373,7 +385,7 @@ function writeLinesSheet(
     "Calc Status",
   ] as const;
 
-  lineCols.forEach((label, idx) => {
+  cols.forEach((label, idx) => {
     ws.getCell(1, idx + 1).value = label;
     styleCell(ws.getCell(1, idx + 1), {
       fill: COLORS.header,
@@ -383,17 +395,113 @@ function writeLinesSheet(
     });
   });
 
-  const sortedLines = sortByAsn(lines);
-  const fillMap = getAsnFillMap(sortedLines);
+  const rows = sortLines(lines);
+  const fillMap = getAsnFillMap(rows);
 
-  sortedLines.forEach((row, idx) => {
-    const asnFill = fillMap.get(String(row["ASN"] || "")) || COLORS.alt1;
+  rows.forEach((row, idx) => {
+    const fill = fillMap.get(String(row["ASN"] || "")) || COLORS.alt1;
 
-    lineCols.forEach((key, cidx) => {
-      ws.getCell(idx + 2, cidx + 1).value = safeText(row[key]);
-      styleCell(ws.getCell(idx + 2, cidx + 1), {
-        border: true,
-        center: true,
-      });
-      ws.getCell(idx + 2, cidx + 1).fill = {
-        type:
+    cols.forEach((key, cidx) => {
+      const cell = ws.getCell(idx + 2, cidx + 1);
+      cell.value = safeText(row[key]);
+      styleCell(cell, { border: true, center: true });
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: fill },
+      };
+    });
+
+    ws.getCell(idx + 2, 5).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: row["Packing Found"] === "YES" ? COLORS.ok : COLORS.warn },
+    };
+    ws.getCell(idx + 2, 6).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: COLORS.calc },
+    };
+    ws.getCell(idx + 2, 7).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: COLORS.calc },
+    };
+    ws.getCell(idx + 2, 8).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: COLORS.calc },
+    };
+    ws.getCell(idx + 2, 11).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: row["Packing Found"] === "YES" ? COLORS.ok : COLORS.warn },
+    };
+    ws.getCell(idx + 2, 12).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: row["Calc Status"] === "OK" ? COLORS.ok : COLORS.warn },
+    };
+  });
+
+  ws.mergeCells(1, 13, 1, 16);
+  ws.getCell(1, 13).value = "Tổng Cartons";
+  styleCell(ws.getCell(1, 13), {
+    fill: COLORS.title,
+    bold: true,
+    center: true,
+    border: true,
+  });
+
+  ["Location", "Thùng chẵn", "Tổng số thùng lẻ", "Tổng"].forEach((label, idx) => {
+    ws.getCell(2, 13 + idx).value = label;
+    styleCell(ws.getCell(2, 13 + idx), {
+      fill: COLORS.header,
+      bold: true,
+      center: true,
+      border: true,
+    });
+  });
+
+  const normalized = normalizeSummary(summary);
+  normalized.forEach((row, idx) => {
+    const r = idx + 3;
+    ws.getCell(r, 13).value = row.Location;
+    ws.getCell(r, 14).value = row["Thùng chẵn"];
+    ws.getCell(r, 15).value = row["Tổng số thùng lẻ"];
+    ws.getCell(r, 16).value = row["Tổng"];
+
+    for (let c = 13; c <= 16; c++) {
+      styleCell(ws.getCell(r, c), { border: true, center: true });
+      ws.getCell(r, c).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: c === 13 ? COLORS.sub : COLORS.calc },
+      };
+    }
+  });
+}
+
+export async function exportExcel(
+  docs: ParsedDoc[],
+  headers: HeaderRow[],
+  lines: LinesRow[],
+  summary: SummaryRow[]
+) {
+  const workbook = new ExcelJS.Workbook();
+
+  const asnSheet = workbook.addWorksheet("ASN");
+  const headerSheet = workbook.addWorksheet("Header");
+  const linesSheet = workbook.addWorksheet("Lines");
+
+  writeAsnSheet(asnSheet, docs || []);
+  writeHeaderSheet(headerSheet, headers || []);
+  writeLinesSheet(linesSheet, lines || [], summary || []);
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  saveAs(blob, "ASN_TOOL_GM_final.xlsx");
+}
