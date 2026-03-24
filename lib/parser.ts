@@ -12,9 +12,9 @@ function normalizeText(text: string): string {
     .replace(/[|]/g, " ")
     .replace(/[：]/g, ":")
     .replace(/\r/g, "\n")
-    // nối đúng LINE NO bị xuống dòng: C2- \n 013D
-    .replace(/((?:C\d|GP)-)\s*\n\s*([0-9]{3}[A-Z])/gi, "$1$2")
-    .replace(/((?:C\d|GP)-)\s+([0-9]{3}[A-Z])/gi, "$1$2")
+    // nối đúng line no bị OCR tách dòng: C2- \n 013D
+    .replace(/((?:C\d|GP)-)\s*\n\s*([0-9OIl]{3}[A-Z])/gi, "$1$2")
+    .replace(/((?:C\d|GP)-)\s+([0-9OIl]{3}[A-Z])/gi, "$1$2")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{2,}/g, "\n")
     .trim();
@@ -31,6 +31,20 @@ function normRev(v: string): string {
 
 function first(pattern: RegExp, text: string): string {
   return text.match(pattern)?.[1]?.trim() || "";
+}
+
+function normalizeLineSuffix(v: string): string {
+  const s = String(v || "").toUpperCase().replace(/[^0-9OIL A-Z]/g, "").replace(/\s+/g, "");
+  if (s.length < 4) return s;
+  const head = s.slice(0, 3).replace(/O/g, "0").replace(/[IL]/g, "1");
+  const tail = s.slice(3, 4).replace(/0/g, "D");
+  return `${head}${tail}`;
+}
+
+function normalizeLineNo(v: string): string {
+  const m = String(v || "").toUpperCase().match(/((?:C\d|GP)-)([0-9OIL]{3}[A-Z])/);
+  if (!m) return "";
+  return `${m[1]}${normalizeLineSuffix(m[2])}`;
 }
 
 async function pdfToOcrText(file: File): Promise<string> {
@@ -77,13 +91,25 @@ export async function fileToText(file: File): Promise<string> {
   return result.data.text || "";
 }
 
-// CHỈ chấp nhận Line No thật kiểu C2-013D / C2-001D / C2-007D / C2-014D
+/**
+ * Chỉ lấy Line No thật của Goodmark:
+ * - C2-013D
+ * - C2-001D
+ * - C2-007D
+ * - C2-014D
+ * Không lấy route XC2-TC2
+ * Không lấy lot XC062951
+ */
 function extractDocLineNo(rawText: string): string {
   const raw = normalizeText(rawText);
 
   const matches = Array.from(
-    raw.matchAll(/\b((?:C\d|GP)-[0-9]{3}[A-Z])\b/gi)
-  ).map((m) => m[1].toUpperCase());
+    raw.matchAll(/\b((?:C\d|GP)-[0-9OIL]{3}[A-Z])\b/gi)
+  )
+    .map((m) => normalizeLineNo(m[1]))
+    .filter(Boolean)
+    .filter((v) => !/XC/i.test(v))
+    .filter((v) => /^(?:C\d|GP)-\d{3}[A-Z]$/.test(v));
 
   if (!matches.length) return "";
 
@@ -105,8 +131,7 @@ function parseItems(rawText: string, docLineNo: string): ParsedItem[] {
   const items: ParsedItem[] = [];
   const seen = new Set<string>();
 
-  // Goodmark thực tế:
-  // PO No | Item No | Rev | Quantity | Uom | NetWeight
+  // PO No | Item No | Rev | Quantity | Uom | NetWeight(optional)
   const regex =
     /(\d{6,}-\d+)\s+(\d{7,})\s+(\d{2})\s+(\d+)\s+(PC|PCS|EA|SET|PR)\s*([\d.]+)?/gi;
 
@@ -123,11 +148,10 @@ function parseItems(rawText: string, docLineNo: string): ParsedItem[] {
 
     const tail = text.slice(match.index, Math.min(text.length, match.index + 260));
 
-    // Lot/Invoice lấy riêng, KHÔNG dùng làm line no
     const lotSo = tail.match(/So:\s*([0-9]{4,})/i)?.[1] || "";
     const lotXc = tail.match(/\bXC([0-9]{5,6})\b/i)?.[1] || "";
 
-    // Khóa cứng: line no của item = line no của cả document
+    // Khóa cứng: mọi item trong ASN dùng line no của document
     const lineNo = docLineNo || "";
 
     const key = `${poNo}|${itemNo}|${rev}|${quantity}|${lineNo}`;
@@ -174,9 +198,7 @@ export function parseTextToDoc(text: string, sourceFile: string): ParsedDoc {
   const shipTo = first(/Ship To\s*:\s*(.*?)\s*ETA\s*:/i, one);
   const location = first(/Location\s*:\s*(.*?)\s*ETD\s*:/i, one);
 
-  // Chỉ lấy line no từ cột cuối đúng format
   const lineNo = extractDocLineNo(raw);
-
   const items = parseItems(raw, lineNo);
   const totalQuantity = items.reduce((sum, x) => sum + Number(x.quantity || 0), 0);
 
