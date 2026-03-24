@@ -12,9 +12,9 @@ function normalizeText(text: string): string {
     .replace(/[|]/g, " ")
     .replace(/[：]/g, ":")
     .replace(/\r/g, "\n")
-    // nối line no bị xuống dòng: C2- \n 085D
-    .replace(/((?:C\d|GP)-)\s*\n\s*([0-9]{2,3}[A-Z]?)/gi, "$1$2")
-    .replace(/((?:C\d|GP)-)\s+([0-9]{2,3}[A-Z]?)/gi, "$1$2")
+    // nối đúng LINE NO bị xuống dòng: C2- \n 013D
+    .replace(/((?:C\d|GP)-)\s*\n\s*([0-9]{3}[A-Z])/gi, "$1$2")
+    .replace(/((?:C\d|GP)-)\s+([0-9]{3}[A-Z])/gi, "$1$2")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{2,}/g, "\n")
     .trim();
@@ -33,22 +33,6 @@ function first(pattern: RegExp, text: string): string {
   return text.match(pattern)?.[1]?.trim() || "";
 }
 
-function extractBestLineNo(text: string): string {
-  const raw = normalizeText(text);
-
-  // Line No đúng của file bạn là kiểu: C2-085D, C2-001D, C2-007D...
-  const matches = Array.from(
-    raw.matchAll(/\b((?:C\d|GP)-[0-9]{2,3}[A-Z]?)\b/gi)
-  ).map((m) => m[1].toUpperCase());
-
-  if (!matches.length) return "";
-
-  const counts = new Map<string, number>();
-  for (const m of matches) counts.set(m, (counts.get(m) || 0) + 1);
-
-  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-}
-
 async function pdfToOcrText(file: File): Promise<string> {
   const bytes = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
@@ -57,7 +41,7 @@ async function pdfToOcrText(file: File): Promise<string> {
 
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 2.0 });
+    const viewport = page.getViewport({ scale: 2.2 });
 
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
@@ -93,7 +77,23 @@ export async function fileToText(file: File): Promise<string> {
   return result.data.text || "";
 }
 
-function parseItems(rawText: string, fallbackLineNo: string): ParsedItem[] {
+// CHỈ chấp nhận Line No thật kiểu C2-013D / C2-001D / C2-007D / C2-014D
+function extractDocLineNo(rawText: string): string {
+  const raw = normalizeText(rawText);
+
+  const matches = Array.from(
+    raw.matchAll(/\b((?:C\d|GP)-[0-9]{3}[A-Z])\b/gi)
+  ).map((m) => m[1].toUpperCase());
+
+  if (!matches.length) return "";
+
+  const counts = new Map<string, number>();
+  for (const v of matches) counts.set(v, (counts.get(v) || 0) + 1);
+
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function parseItems(rawText: string, docLineNo: string): ParsedItem[] {
   const text = flattenText(rawText)
     .replace(/GOOD MARK INDUSTRIAL VIETNAM COMPANY LIMITED\(\d+\)/gi, " ")
     .replace(/Delivery Note/gi, " ")
@@ -105,7 +105,8 @@ function parseItems(rawText: string, fallbackLineNo: string): ParsedItem[] {
   const items: ParsedItem[] = [];
   const seen = new Set<string>();
 
-  // PO | Item | Rev | Qty | UOM | optional NetWeight
+  // Goodmark thực tế:
+  // PO No | Item No | Rev | Quantity | Uom | NetWeight
   const regex =
     /(\d{6,}-\d+)\s+(\d{7,})\s+(\d{2})\s+(\d+)\s+(PC|PCS|EA|SET|PR)\s*([\d.]+)?/gi;
 
@@ -122,15 +123,12 @@ function parseItems(rawText: string, fallbackLineNo: string): ParsedItem[] {
 
     const tail = text.slice(match.index, Math.min(text.length, match.index + 260));
 
-    // Lot/Invoice là So + XC
+    // Lot/Invoice lấy riêng, KHÔNG dùng làm line no
     const lotSo = tail.match(/So:\s*([0-9]{4,})/i)?.[1] || "";
     const lotXc = tail.match(/\bXC([0-9]{5,6})\b/i)?.[1] || "";
 
-    // Line No đúng là dạng C2-085D / C2-001D / C2-013D...
-    const lineNo =
-      tail.match(/\b((?:C\d|GP)-[0-9]{2,3}[A-Z]?)\b/i)?.[1]?.toUpperCase() ||
-      fallbackLineNo ||
-      "";
+    // Khóa cứng: line no của item = line no của cả document
+    const lineNo = docLineNo || "";
 
     const key = `${poNo}|${itemNo}|${rev}|${quantity}|${lineNo}`;
     if (seen.has(key)) continue;
@@ -176,7 +174,9 @@ export function parseTextToDoc(text: string, sourceFile: string): ParsedDoc {
   const shipTo = first(/Ship To\s*:\s*(.*?)\s*ETA\s*:/i, one);
   const location = first(/Location\s*:\s*(.*?)\s*ETD\s*:/i, one);
 
-  const lineNo = extractBestLineNo(raw);
+  // Chỉ lấy line no từ cột cuối đúng format
+  const lineNo = extractDocLineNo(raw);
+
   const items = parseItems(raw, lineNo);
   const totalQuantity = items.reduce((sum, x) => sum + Number(x.quantity || 0), 0);
 
