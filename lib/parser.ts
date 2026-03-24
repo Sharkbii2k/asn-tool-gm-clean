@@ -102,14 +102,29 @@ export async function fileToText(file: File): Promise<string> {
  */
 function extractDocLineNo(rawText: string): string {
   const raw = normalizeText(rawText);
+  const one = flattenText(rawText);
 
-  const matches = Array.from(
-    raw.matchAll(/\b((?:C\d|GP)-[0-9OIL]{3}[A-Z0-9])\b/gi)
-  )
-    .map((m) => {
-      let v = m[1].toUpperCase();
+  const candidates: string[] = [];
 
-      const mm = v.match(/^((?:C\d|GP)-)([0-9OIL]{3})([A-Z0-9])$/);
+  // 1) Bắt mẫu gần cột cuối kiểu: XC062951 C2-013D
+  for (const m of one.matchAll(/\bXC\d{5,6}\s+((?:C\d|GP)-[0-9OIL]{3}[A-Z0-9])\b/gi)) {
+    candidates.push(m[1]);
+  }
+
+  // 2) Bắt mẫu sau chữ Line No nếu OCR giữ được header
+  for (const m of one.matchAll(/Line\s*No\.?\s*((?:C\d|GP)-[0-9OIL]{3}[A-Z0-9])/gi)) {
+    candidates.push(m[1]);
+  }
+
+  // 3) Fallback: mọi mẫu line thật trong text
+  for (const m of one.matchAll(/\b((?:C\d|GP)-[0-9OIL]{3}[A-Z0-9])\b/gi)) {
+    candidates.push(m[1]);
+  }
+
+  const normalized = candidates
+    .map((v) => {
+      const s = String(v).toUpperCase();
+      const mm = s.match(/^((?:C\d|GP)-)([0-9OIL]{3})([A-Z0-9])$/);
       if (!mm) return "";
 
       const prefix = mm[1];
@@ -119,8 +134,7 @@ function extractDocLineNo(rawText: string): string {
         .replace(/L/g, "1");
 
       let suffix = mm[3];
-      if (suffix === "0") suffix = "D";
-      if (suffix === "O") suffix = "D";
+      if (suffix === "0" || suffix === "O") suffix = "D";
 
       return `${prefix}${nums}${suffix}`;
     })
@@ -128,10 +142,10 @@ function extractDocLineNo(rawText: string): string {
     .filter((v) => !/XC/i.test(v))
     .filter((v) => /^(?:C\d|GP)-\d{3}[A-Z]$/.test(v));
 
-  if (!matches.length) return "";
+  if (!normalized.length) return "";
 
   const counts = new Map<string, number>();
-  for (const v of matches) {
+  for (const v of normalized) {
     counts.set(v, (counts.get(v) || 0) + 1);
   }
 
